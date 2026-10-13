@@ -95,6 +95,8 @@ __all__ = (
 )
 
 import os
+import threading
+import time
 from math import cos, pi, sin, sqrt
 
 from kivy.animation import Animation
@@ -694,18 +696,36 @@ class M3CommonRipple(CommonRipple):
         super().__init__(**kwargs)
         self.init_fbos()
 
+    def _trace(self, message):
+        print(
+            f"[RIPPLE_TRACE] "
+            f"t={time.monotonic():.3f} "
+            f"thread={threading.current_thread().name} "
+            f"instance={id(self):x} "
+            f"state={getattr(self, '_anim_state', '?')} "
+            f"progress={getattr(self, '_progress', '?')} "
+            f"{message}",
+            flush=True,
+        )
+
     def init_fbos(self):
+        self._trace("init_fbos: BEGIN")
         self._phase = 0.0
         self.ripple_pos = (0, 0)
         # TODO: Remove group also deallocates it from mem?
+        self._trace("init_fbos: before Fbo")
         self.fbo = Fbo(size=[50] * 2, group="m3_ripple_behavior")
+        self._trace("init_fbos: after Fbo")
+        self._trace("init_fbos: before set_shader")
         self.set_shader(self.fbo)
-
+        self._trace("init_fbos: after set_shader")
+        self._trace("init_fbos: before Fbo instructions")
         with self.fbo:
             ClearColor(0, 0, 0, 0)
             ClearBuffers()
             Color(1, 1, 1, 1)
             self.rect = Rectangle(pos=(0, 0), size=[50] * 2)
+        self._trace("init_fbos: after Fbo instructions")
 
     def _get_actual_radius(self):
         if hasattr(self, "radius"):
@@ -770,7 +790,9 @@ class M3CommonRipple(CommonRipple):
             return
 
         with self.active_canvas:
+            self._trace("canvas: before add fbo")
             self.active_canvas.add(self.fbo)
+            self._trace("canvas: after add fbo")
 
             instr_params = {
                 "size": self.size,
@@ -786,20 +808,34 @@ class M3CommonRipple(CommonRipple):
 
             instr = Ellipse if shape_kind == 1.0 else RoundedRectangle
 
+            self._trace("canvas: before StencilPush")
             StencilPush(group="m3_ripple_behavior")
+            self._trace("canvas: after StencilPush")
+            self._trace("canvas: before StencilUse")
             instr(**instr_params, **radius_setting)
             StencilUse(group="m3_ripple_behavior")
+            self._trace("canvas: after StencilUse")
 
             # Real render is here.
+            self._trace("canvas: before Color")
             Color(1, 1, 1, 1, group="m3_ripple_behavior")
+            self._trace("canvas: after Color")
+            self._trace("canvas: before textured instruction")
             if shape_kind == 1.0:
                 Ellipse(**instr_params, texture=self.fbo.texture)
             else:
                 Rectangle(**instr_params, texture=self.fbo.texture)
+            self._trace("canvas: after textured instruction")
 
+            self._trace("canvas: before StencilUnUse")
             StencilUnUse(group="m3_ripple_behavior")
+            self._trace("canvas: after StencilUnUse")
+            self._trace("canvas: before second instr")
             instr(**instr_params, **radius_setting)
+            self._trace("canvas: after second instr")
+            self._trace("canvas: before StencilPop")
             StencilPop(group="m3_ripple_behavior")
+            self._trace("canvas: after StencilPop")
 
     def _get_shape_kind(self) -> float:
         return 0.0
@@ -875,6 +911,7 @@ class M3CommonRipple(CommonRipple):
         self._update_uniforms()
 
     def _update_uniforms(self):
+        self._trace("update: BEGIN")
         if self.fbo is None:
             return
 
@@ -883,6 +920,7 @@ class M3CommonRipple(CommonRipple):
         radius = sqrt((w / 2.0) ** 2 + (h / 2.0) ** 2)
         touch_x, touch_y = self.ripple_pos
         rc = self.fbo
+        self._trace("update: before uniforms")
         rc["in_resolutionScale"] = (1.0 / w, 1.0 / h)
 
         # Coordinate contract for the M3 shader:
@@ -943,21 +981,30 @@ class M3CommonRipple(CommonRipple):
         rc["in_tRotation1"] = (cos(r1), sin(r1))
         rc["in_tRotation2"] = (cos(r2), sin(r2))
         rc["in_tRotation3"] = (cos(r3), sin(r3))
+        self._trace("update: after uniforms")
 
         # Draw finally.
+        self._trace("update: before canvas children loop")
         for child in self.active_canvas.children:
             if hasattr(child, "size") and child.size != self.size:
                 child.size = self.size
             if hasattr(child, "pos") and child.pos != self.pos:
                 child.pos = self.pos
+        self._trace("update: after canvas children loop")
 
+        self._trace("update: before Fbo resize")
         if self.fbo.size != self.size:
             self.fbo.size = self.size
+        self._trace("update: after Fbo resize")
 
+        self._trace("update: before rect resize")
         if self.rect.size != self.size:
             self.rect.size = self.size
+        self._trace("update: after rect resize")
 
+        self._trace("update: before ask_update")
         self.fbo.ask_update()
+        self._trace("update: after ask_update")
 
     def _get_amin_func(self, progress: float) -> float:
         """Return the eased value based on ripple_func property."""
@@ -977,16 +1024,21 @@ class M3CommonRipple(CommonRipple):
         return anim_func(progress)
 
     def anim_complete(self, *args) -> None:
+        self._trace("complete: BEGIN")
         if self._event:
             self._event.cancel()
             self._event = None
 
         self._anim_state = "off"
         self._progress = 1.0
+        self._trace("complete: before _update_uniforms")
         self._update_uniforms()
+        self._trace("complete: after _update_uniforms")
         self._doing_ripple = False
         self._force_exit = False
+        self._trace("complete: before remove_group")
         self.active_canvas.remove_group("m3_ripple_behavior")
+        self._trace("complete: after remove_group")
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos) and not self.disabled:
