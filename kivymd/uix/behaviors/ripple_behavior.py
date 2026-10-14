@@ -993,17 +993,18 @@ class M3CommonRipple(CommonRipple):
         self._trace("update: after canvas children loop")
 
         self._trace("update: before Fbo resize")
-        if self.fbo.size != self.size:
+        if self.fbo is not None and self.fbo.size != self.size:
             self.fbo.size = self.size
         self._trace("update: after Fbo resize")
 
         self._trace("update: before rect resize")
-        if self.rect.size != self.size:
+        if self.rect is not None and self.rect.size != self.size:
             self.rect.size = self.size
         self._trace("update: after rect resize")
 
         self._trace("update: before ask_update")
-        self.fbo.ask_update()
+        if self.fbo is not None:
+            self.fbo.ask_update()
         self._trace("update: after ask_update")
 
     def _get_amin_func(self, progress: float) -> float:
