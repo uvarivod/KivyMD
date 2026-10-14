@@ -714,18 +714,23 @@ class M3CommonRipple(CommonRipple):
         self.ripple_pos = (0, 0)
         # TODO: Remove group also deallocates it from mem?
         self._trace("init_fbos: before Fbo")
-        self.fbo = Fbo(size=[50] * 2, group="m3_ripple_behavior")
-        self._trace("init_fbos: after Fbo")
-        self._trace("init_fbos: before set_shader")
-        self.set_shader(self.fbo)
-        self._trace("init_fbos: after set_shader")
-        self._trace("init_fbos: before Fbo instructions")
-        with self.fbo:
-            ClearColor(0, 0, 0, 0)
-            ClearBuffers()
-            Color(1, 1, 1, 1)
-            self.rect = Rectangle(pos=(0, 0), size=[50] * 2)
-        self._trace("init_fbos: after Fbo instructions")
+        try:
+            self.fbo = Fbo(size=[50] * 2)  # Remove group to avoid conflicts
+            self._trace("init_fbos: after Fbo")
+            self._trace("init_fbos: before set_shader")
+            self.set_shader(self.fbo)
+            self._trace("init_fbos: after set_shader")
+            self._trace("init_fbos: before Fbo instructions")
+            with self.fbo:
+                ClearColor(0, 0, 0, 0)
+                ClearBuffers()
+                Color(1, 1, 1, 1)
+                self.rect = Rectangle(pos=(0, 0), size=[50] * 2)
+            self._trace("init_fbos: after Fbo instructions")
+        except Exception as e:
+            self._trace(f"init_fbos: ERROR - {e}")
+            self.fbo = None
+            self.ripple_effect = False  # Disable ripple effect if Fbo fails
 
     def _get_actual_radius(self):
         if hasattr(self, "radius"):
@@ -783,16 +788,23 @@ class M3CommonRipple(CommonRipple):
             self._doing_ripple = False
             self._force_exit = False
 
-        self.lay_canvas_instructions()
-
+        # Delay canvas setup to give Fbo time to initialize
+        Clock.schedule_once(self._delayed_lay_canvas_instructions, 0.016)  # ~1 frame delay
         self.start_ripple()
         self._start_event = None
+
+    def _delayed_lay_canvas_instructions(self, dt):
+        self.lay_canvas_instructions()
 
     def lay_canvas_instructions(self) -> None:
         if not self.ripple_effect:
             return
 
         if self.fbo is None:
+            return
+
+        # Check if Fbo texture is valid before adding to canvas
+        if self.fbo.texture is None or self.fbo.texture.width == 0 or self.fbo.texture.height == 0:
             return
 
         # Check if Fbo is already in the canvas to avoid duplicate additions
@@ -818,13 +830,14 @@ class M3CommonRipple(CommonRipple):
 
             instr = Ellipse if shape_kind == 1.0 else RoundedRectangle
 
-            self._trace("canvas: before StencilPush")
-            StencilPush(group="m3_ripple_behavior")
-            self._trace("canvas: after StencilPush")
-            self._trace("canvas: before StencilUse")
-            instr(**instr_params, **radius_setting)
-            StencilUse(group="m3_ripple_behavior")
-            self._trace("canvas: after StencilUse")
+            # Skip stencil operations as workaround for Kivy C graphics crash
+            # self._trace("canvas: before StencilPush")
+            # StencilPush(group="m3_ripple_behavior")
+            # self._trace("canvas: after StencilPush")
+            # self._trace("canvas: before StencilUse")
+            # instr(**instr_params, **radius_setting)
+            # StencilUse(group="m3_ripple_behavior")
+            # self._trace("canvas: after StencilUse")
 
             # Real render is here.
             self._trace("canvas: before Color")
@@ -838,15 +851,15 @@ class M3CommonRipple(CommonRipple):
                     Rectangle(**instr_params, texture=self.fbo.texture)
             self._trace("canvas: after textured instruction")
 
-            self._trace("canvas: before StencilUnUse")
-            StencilUnUse(group="m3_ripple_behavior")
-            self._trace("canvas: after StencilUnUse")
-            self._trace("canvas: before second instr")
-            instr(**instr_params, **radius_setting)
-            self._trace("canvas: after second instr")
-            self._trace("canvas: before StencilPop")
-            StencilPop(group="m3_ripple_behavior")
-            self._trace("canvas: after StencilPop")
+            # self._trace("canvas: before StencilUnUse")
+            # StencilUnUse(group="m3_ripple_behavior")
+            # self._trace("canvas: after StencilUnUse")
+            # self._trace("canvas: before second instr")
+            # instr(**instr_params, **radius_setting)
+            # self._trace("canvas: after second instr")
+            # self._trace("canvas: before StencilPop")
+            # StencilPop(group="m3_ripple_behavior")
+            # self._trace("canvas: after StencilPop")
 
     def _get_shape_kind(self) -> float:
         return 0.0
