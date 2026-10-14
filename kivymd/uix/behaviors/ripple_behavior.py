@@ -774,19 +774,29 @@ class M3CommonRipple(CommonRipple):
 
         self._set_ripple_color()
 
-        self.anim_complete()
-        self.lay_canvas_instructions()
+        # Cancel existing animation without tearing down canvas to avoid race condition
+        if self._doing_ripple:
+            if self._event:
+                self._event.cancel()
+                self._event = None
+            self._anim_state = "off"
+            self._doing_ripple = False
+            self._force_exit = False
 
-        if self._first_startup is False:
-            self.anim_complete()
-            self.lay_canvas_instructions()
-            self._first_startup = True
+        self.lay_canvas_instructions()
 
         self.start_ripple()
         self._start_event = None
 
     def lay_canvas_instructions(self) -> None:
         if not self.ripple_effect:
+            return
+
+        if self.fbo is None:
+            return
+
+        # Check if Fbo is already in the canvas to avoid duplicate additions
+        if self.fbo in self.active_canvas.children:
             return
 
         with self.active_canvas:
@@ -821,10 +831,11 @@ class M3CommonRipple(CommonRipple):
             Color(1, 1, 1, 1, group="m3_ripple_behavior")
             self._trace("canvas: after Color")
             self._trace("canvas: before textured instruction")
-            if shape_kind == 1.0:
-                Ellipse(**instr_params, texture=self.fbo.texture)
-            else:
-                Rectangle(**instr_params, texture=self.fbo.texture)
+            if self.fbo is not None and self.fbo.texture is not None:
+                if shape_kind == 1.0:
+                    Ellipse(**instr_params, texture=self.fbo.texture)
+                else:
+                    Rectangle(**instr_params, texture=self.fbo.texture)
             self._trace("canvas: after textured instruction")
 
             self._trace("canvas: before StencilUnUse")
@@ -842,6 +853,7 @@ class M3CommonRipple(CommonRipple):
 
     _anim_time = 0
     _event = None
+    _should_remove_group = True
 
     def start_ripple(self) -> None:
         self._phase = 0.0
@@ -906,13 +918,24 @@ class M3CommonRipple(CommonRipple):
             self._progress = 0.5 + t * 0.5
 
             if t >= 1.0:
-                self.anim_complete()
+                # Delay anim_complete to avoid tearing down canvas while rendering
+                Clock.schedule_once(self.anim_complete, 0)
+                self._anim_state = "off"
+                self._doing_ripple = False
+                if self._event:
+                    self._event.cancel()
+                    self._event = None
+                return  # Skip _update_uniforms since animation is done
 
         self._update_uniforms()
 
     def _update_uniforms(self):
         self._trace("update: BEGIN")
         if self.fbo is None:
+            return
+
+        # Don't update if we're not doing a ripple to avoid threading issues
+        if not self._doing_ripple and self._anim_state == "off":
             return
 
         w, h = self._clamp_size(*self.size)
@@ -1037,8 +1060,19 @@ class M3CommonRipple(CommonRipple):
         self._trace("complete: after _update_uniforms")
         self._doing_ripple = False
         self._force_exit = False
+        # Delay removal to avoid race condition with C graphics layer
+        Clock.schedule_once(self._remove_canvas_group, 0)
+
+    def _remove_canvas_group(self, dt):
+        if not self._should_remove_group:
+            return
         self._trace("complete: before remove_group")
-        self.active_canvas.remove_group("m3_ripple_behavior")
+        try:
+            # Check if group exists before removing
+            if self.active_canvas.get_group("m3_ripple_behavior"):
+                self.active_canvas.remove_group("m3_ripple_behavior")
+        except:
+            pass  # Group may already be removed
         self._trace("complete: after remove_group")
 
     def on_touch_down(self, touch):
